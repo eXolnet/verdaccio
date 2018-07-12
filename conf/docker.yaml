@@ -13,11 +13,13 @@
 # path to a directory with all packages
 storage: /verdaccio/storage
 
+url_prefix: http://localhost:4873/
+
 web:
   # WebUI is enabled as default, if you want disable it, just uncomment this line
   enable: true
-  title: Exolnet - Components Sharing
-  logo: https://www.exolnet.com/img/x.svg
+  #title: Exolnet - Components Sharing
+  #logo: https://www.exolnet.com/img/x.svg
 
 auth:
   htpasswd:
@@ -34,7 +36,7 @@ uplinks:
 packages:
   '@*/*':
     # scoped packages
-    access: $all
+    access: $authenticated
     publish: $authenticated
     proxy: npmjs
 
@@ -44,7 +46,7 @@ packages:
     #
     # you can specify usernames/groupnames (depending on your auth plugin)
     # and three keywords: "$all", "$anonymous", "$authenticated"
-    access: $all
+    access: $authenticated
 
     # allow all known users to publish packages
     # (anyone can register by default, remember?)
