@@ -13,13 +13,11 @@
 # path to a directory with all packages
 storage: /verdaccio/storage
 
-url_prefix: http://localhost:4873/
-
 web:
   # WebUI is enabled as default, if you want disable it, just uncomment this line
   enable: true
-  #title: Exolnet - Components Sharing
-  #logo: https://www.exolnet.com/img/x.svg
+  title: Exolnet - Components Sharing
+  logo: https://www.exolnet.com/img/x.svg
 
 auth:
   htpasswd:

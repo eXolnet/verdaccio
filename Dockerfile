@@ -30,6 +30,8 @@ RUN npm config set registry http://registry.npmjs.org/ && \
 
 RUN mkdir -p /verdaccio/storage /verdaccio/conf
 
+RUN rm -f /verdaccio/conf/config.yaml
+
 ADD conf/docker.yaml /verdaccio/conf/config.yaml
 
 RUN addgroup -S verdaccio && adduser -S -G verdaccio verdaccio && \
