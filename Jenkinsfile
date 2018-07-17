@@ -1,25 +1,30 @@
-node {
-    def app
-
-    stage('Clone repository') {
-        /* Let's make sure we have the repository cloned to our workspace */
-
-        checkout scm
+pipeline{
+    agent {
+        docker
     }
+    node {
+        def app
 
-    stage('Build image') {
-        /* This builds the actual image; synonymous to
-         * docker build on the command line */
+        stage('Clone repository') {
+            /* Let's make sure we have the repository cloned to our workspace */
 
-        app = docker.build("exolnet-verdaccio", "-t exolnet-verdaccio:latest .")
-    }
+            checkout scm
+        }
 
-    stage('Test image') {
-        /* Ideally, we would run a test framework against our image.
-         * For this example, we're using a Volkswagen-type approach ;-) */
+        stage('Build image') {
+            /* This builds the actual image; synonymous to
+             * docker build on the command line */
 
-        app.inside {
-            sh 'echo "Tests passed"'
+            app = docker.build("exolnet-verdaccio:3.2.0", "-t exolnet-verdaccio:latest .")
+        }
+
+        stage('Test image') {
+            /* Ideally, we would run a test framework against our image.
+             * For this example, we're using a Volkswagen-type approach ;-) */
+
+            app.inside {
+                sh 'echo "Tests passed"'
+            }
         }
     }
 }
