@@ -57,6 +57,45 @@ packages:
 middlewares:
   audit:
     enabled: true
+#  github-oauth:
+#    client-id: github-app-id # required
+#    client-secret: github-app-secret # required
+
+
+#####################################################################
+# Advanced settings
+#####################################################################
+
+## Special packages publish configurations
+#publish:
+## This will allow the publisher to publish packages even if any uplink is down.
+allow_offline: true
+
+# if you use nginx with custom path, use this to override links
+#url_prefix: https://dev.company.local/verdaccio/
+
+# You can specify listen address (or simply a port).
+# If you add multiple values, verdaccio will listen on all of them.
+#
+# Examples:
+#
+listen:
+ - https://npm-registry.exolnet.com/
+
+# Configure HTTPS, it is required if you use "https" protocol above.
+#https:
+#  key: path/to/server.key
+#  cert: path/to/server.crt
+# ca: path/to/server.pem
+
+# type: file | stdout | stderr
+# level: trace | debug | info | http (default) | warn | error | fatal
+#
+# parameters for file: name is filename
+#  {type: 'file', path: 'verdaccio.log', level: 'debug'},
+#
+# parameters for stdout and stderr: format: json | pretty | pretty-timestamped
+#  {type: 'stdout', format: 'pretty', level: 'debug'},
 
 # log settings
 logs:
