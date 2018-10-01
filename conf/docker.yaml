@@ -16,7 +16,7 @@ storage: /verdaccio/storage
 web:
   # WebUI is enabled as default, if you want disable it, just uncomment this line
   enable: true
-  title: Exolnet - Components Sharing
+  title: Exolnet - Components Library
   logo: https://www.exolnet.com/img/x.svg
 
 auth:
