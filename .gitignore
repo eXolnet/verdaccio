@@ -30,3 +30,18 @@ __tests__
 # Compiled script
 static/*
 
+# Editor
+/*.iml
+/*.ipr
+/*.iws
+/.idea/
+/.vscode/
+/_ide_helper.php
+/.phpstorm.meta.php
+.*.sw[a-p]
+
+# OS
+.DS_Store
+desktop.ini
+Thumbs.db
+
