@@ -8,12 +8,12 @@ import _ from 'lodash';
 // $FlowFixMe
 import {ErrorCode, isObject, getLatestVersion, tagVersion, validateName, DIST_TAGS} from './utils';
 import {
-  generatePackageTemplate, normalizePackage, generateRevision, getLatestReadme, cleanUpReadme,
+  generatePackageTemplate, normalizePackage, generateRevision, getLatestReadme, cleanUpReadme, normalizeContributors,
 fileExist, noSuchFile, DEFAULT_REVISION, pkgFileName,
 } from './storage-utils';
 import {createTarballHash} from './crypto-utils';
 import {prepareSearchPackage} from './storage-utils';
-import {loadPlugin} from '../lib/plugin-loader';
+import loadPlugin from '../lib/plugin-loader';
 import LocalDatabase from '@verdaccio/local-storage';
 import {UploadTarball, ReadTarball} from '@verdaccio/streams';
 import type {
@@ -34,6 +34,7 @@ IUploadTarball,
 IReadTarball,
 } from '@verdaccio/streams';
 import type {IStorage, StringValue} from '../../types';
+import {API_ERROR} from './constants';
 
 /**
  * Implements Storage interface (same for storage.js, local-storage.js, up-storage.js).
@@ -53,12 +54,12 @@ class LocalStorage implements IStorage {
     const storage: any = this._getLocalStorage(name);
 
     if (_.isNil(storage)) {
-      return callback( ErrorCode.get404('this package cannot be added'));
+      return callback( ErrorCode.getNotFound('this package cannot be added'));
     }
 
     storage.createPackage(name, generatePackageTemplate(name), (err) => {
       if (_.isNull(err) === false && err.code === fileExist) {
-        return callback( ErrorCode.get409());
+        return callback( ErrorCode.getConflict());
       }
 
       const latest = getLatestVersion(pkg);
@@ -80,13 +81,13 @@ class LocalStorage implements IStorage {
     let storage: any = this._getLocalStorage(name);
 
     if (_.isNil(storage)) {
-      return callback( ErrorCode.get404());
+      return callback( ErrorCode.getNotFound());
     }
 
     storage.readPackage(name, (err, data) => {
       if (_.isNil(err) === false) {
         if (err.code === noSuchFile) {
-          return callback( ErrorCode.get404());
+          return callback( ErrorCode.getNotFound());
         } else {
           return callback(err);
         }
@@ -97,7 +98,7 @@ class LocalStorage implements IStorage {
       this.localData.remove(name, (removeFailed) => {
         if (removeFailed) {
           // This will happen when database is locked
-          return callback(ErrorCode.get422(removeFailed.message));
+          return callback(ErrorCode.getBadData(removeFailed.message));
         }
 
         storage.deletePackage(pkgFileName, (err) => {
@@ -137,6 +138,7 @@ class LocalStorage implements IStorage {
           // we don't keep readmes for package versions,
           // only one readme per package
           version = cleanUpReadme(version);
+          version.contributors = normalizeContributors(version.contributors);
 
           change = true;
           packageLocalJson.versions[versionId] = version;
@@ -218,9 +220,10 @@ class LocalStorage implements IStorage {
 
       // TODO: lodash remove
       metadata = cleanUpReadme(metadata);
+      metadata.contributors = normalizeContributors(metadata.contributors);
 
       if (data.versions[version] != null) {
-        return cb( ErrorCode.get409() );
+        return cb( ErrorCode.getConflict() );
       }
 
       // if uploaded tarball has a different shasum, it's very likely that we have some kind of error
@@ -231,7 +234,7 @@ class LocalStorage implements IStorage {
           if (_.isNil(data._attachments[tarball].shasum) === false && _.isNil(metadata.dist.shasum) === false) {
             if (data._attachments[tarball].shasum != metadata.dist.shasum) {
               const errorMessage = `shasum error, ${data._attachments[tarball].shasum} != ${metadata.dist.shasum}`;
-              return cb( ErrorCode.get400(errorMessage) );
+              return cb( ErrorCode.getBadRequest(errorMessage) );
             }
           }
 
@@ -258,7 +261,7 @@ class LocalStorage implements IStorage {
 
       this.localData.add(name, (addFailed) => {
         if (addFailed) {
-          return cb(ErrorCode.get422(addFailed.message));
+          return cb(ErrorCode.getBadData(addFailed.message));
         }
 
         cb();
@@ -268,12 +271,12 @@ class LocalStorage implements IStorage {
 
   /**
    * Merge a new list of tags for a local packages with the existing one.
-   * @param {*} name
+   * @param {*} pkgName
    * @param {*} tags
    * @param {*} callback
    */
-  mergeTags(name: string, tags: MergeTags, callback: Callback) {
-    this._updatePackage(name, (data, cb) => {
+  mergeTags(pkgName: string, tags: MergeTags, callback: Callback) {
+    this._updatePackage(pkgName, (data, cb) => {
       /* eslint guard-for-in: 0 */
       for (let tag: string in tags) {
         // this handle dist-tag rm command
@@ -298,7 +301,7 @@ class LocalStorage implements IStorage {
    * @private
    */
   _getVersionNotFound() {
-    return ErrorCode.get404('this version doesn\'t exist');
+    return ErrorCode.getNotFound(API_ERROR.VERSION_NOT_EXIST);
   }
 
   /**
@@ -307,41 +310,42 @@ class LocalStorage implements IStorage {
    * @private
    */
   _getFileNotAvailable() {
-    return ErrorCode.get404('no such file available');
+    return ErrorCode.getNotFound('no such file available');
   }
 
   /**
    * Update the package metadata, tags and attachments (tarballs).
    * Note: Currently supports unpublishing only.
    * @param {*} name
-   * @param {*} pkg
+   * @param {*} incomingPkg
    * @param {*} revision
    * @param {*} callback
    * @return {Function}
    */
   changePackage(name: string,
-                pkg: Package,
+                incomingPkg: Package,
                 revision?: string, callback: Callback) {
-    if (!isObject(pkg.versions) || !isObject(pkg[DIST_TAGS])) {
-      return callback( ErrorCode.get422());
+    if (!isObject(incomingPkg.versions) || !isObject(incomingPkg[DIST_TAGS])) {
+      return callback( ErrorCode.getBadData());
     }
 
-    this._updatePackage(name, (jsonData, cb) => {
-      for (let ver in jsonData.versions) {
-        if (_.isNil(pkg.versions[ver])) {
-          this.logger.info( {name: name, version: ver}, 'unpublishing @{name}@@{version}');
+    this._updatePackage(name, (localData, cb) => {
+      for (let version in localData.versions) {
+        if (_.isNil(incomingPkg.versions[version])) {
+          this.logger.info( {name: name, version: version}, 'unpublishing @{name}@@{version}');
 
-          delete jsonData.versions[ver];
+          delete localData.versions[version];
+          delete localData.time[version];
 
-          for (let file in jsonData._attachments) {
-            if (jsonData._attachments[file].version === ver) {
-              delete jsonData._attachments[file].version;
+          for (let file in localData._attachments) {
+            if (localData._attachments[file].version === version) {
+              delete localData._attachments[file].version;
             }
           }
         }
       }
 
-      jsonData[DIST_TAGS] = pkg[DIST_TAGS];
+      localData[DIST_TAGS] = incomingPkg[DIST_TAGS];
       cb();
     }, function(err) {
       if (err) {
@@ -395,8 +399,8 @@ class LocalStorage implements IStorage {
     const _transform = uploadStream._transform;
     const storage = this._getLocalStorage(name);
 
-    uploadStream.abort = function() {};
-    uploadStream.done = function() {};
+    (uploadStream: any).abort = function() {};
+    (uploadStream: any).done = function() {};
 
     uploadStream._transform = function(data) {
       shaOneHash.update(data);
@@ -407,7 +411,7 @@ class LocalStorage implements IStorage {
 
     if (name === pkgFileName || name === '__proto__') {
       process.nextTick(() => {
-        uploadStream.emit('error', ErrorCode.get403());
+        uploadStream.emit('error', ErrorCode.getForbidden());
       });
       return uploadStream;
     }
@@ -423,7 +427,8 @@ class LocalStorage implements IStorage {
 
     writeStream.on('error', (err) => {
       if (err.code === fileExist) {
-        uploadStream.emit('error', ErrorCode.get409());
+        uploadStream.emit('error', ErrorCode.getConflict());
+        uploadStream.abort();
       } else if (err.code === noSuchFile) {
         // check if package exists to throw an appropriate message
         this.getPackageMetadata(name, function(_err, res) {
@@ -458,13 +463,13 @@ class LocalStorage implements IStorage {
       });
     });
 
-    uploadStream.abort = function() {
+    (uploadStream: any).abort = function() {
       writeStream.abort();
     };
 
-    uploadStream.done = function() {
+    (uploadStream: any).done = function() {
       if (!length) {
-        uploadStream.emit('error', ErrorCode.get422('refusing to accept zero-length file'));
+        uploadStream.emit('error', ErrorCode.getBadData('refusing to accept zero-length file'));
         writeStream.abort();
       } else {
         writeStream.done();
@@ -518,9 +523,9 @@ class LocalStorage implements IStorage {
   _streamSuccessReadTarBall(storage: any, filename: string): IReadTarball {
     const stream: IReadTarball = new ReadTarball();
     const readTarballStream = storage.readTarball(filename);
-    const e404 = ErrorCode.get404;
+    const e404 = ErrorCode.getNotFound;
 
-    stream.abort = function() {
+    (stream: any).abort = function() {
       if (_.isNil(readTarballStream) === false) {
         readTarballStream.abort();
       }
@@ -556,7 +561,7 @@ class LocalStorage implements IStorage {
   getPackageMetadata(name: string, callback?: Callback = () => {}): void {
     const storage: IPackageStorage = this._getLocalStorage(name);
     if (_.isNil(storage)) {
-      return callback( ErrorCode.get404() );
+      return callback( ErrorCode.getNotFound() );
     }
 
     this._readPackage(name, storage, callback);
@@ -569,7 +574,7 @@ class LocalStorage implements IStorage {
    * @return {Function}
    */
   search(startKey: string, options: any) {
-    const stream = new UploadTarball({objectMode: true});
+    const stream = new ReadTarball({objectMode: true});
 
     this._searchEachPackage((item, cb) => {
       if (item.time > parseInt(startKey, 10)) {
@@ -599,11 +604,11 @@ class LocalStorage implements IStorage {
 
   /**
    * Retrieve a wrapper that provide access to the package location.
-   * @param {Object} packageInfo package name.
+   * @param {Object} pkgName package name.
    * @return {Object}
    */
-  _getLocalStorage(packageInfo: string): IPackageStorage {
-    return this.localData.getPackageStorage(packageInfo);
+  _getLocalStorage(pkgName: string): IPackageStorage {
+    return this.localData.getPackageStorage(pkgName);
   }
 
   /**
@@ -615,7 +620,7 @@ class LocalStorage implements IStorage {
     storage.readPackage(name, (err, result) => {
       if (err) {
         if (err.code === noSuchFile) {
-          return callback( ErrorCode.get404() );
+          return callback( ErrorCode.getNotFound() );
         } else {
           return callback(this._internalError(err, pkgFileName, 'error reading'));
         }
@@ -665,21 +670,21 @@ class LocalStorage implements IStorage {
 
   /**
    * Retrieve either a previous created local package or a boilerplate.
-   * @param {*} name
+   * @param {*} pkgName
    * @param {*} callback
    * @return {Function}
    */
-  _readCreatePackage(name: string, callback: Callback) {
-    const storage: any = this._getLocalStorage(name);
+  _readCreatePackage(pkgName: string, callback: Callback) {
+    const storage: any = this._getLocalStorage(pkgName);
     if (_.isNil(storage)) {
-      return this._createNewPackage(name, callback);
+      return this._createNewPackage(pkgName, callback);
     }
 
-    storage.readPackage(name, (err, data) => {
+    storage.readPackage(pkgName, (err, data) => {
       // TODO: race condition
       if (_.isNil(err) === false) {
         if (err.code === noSuchFile) {
-          data = generatePackageTemplate(name);
+          data = generatePackageTemplate(pkgName);
         } else {
           return callback(this._internalError(err, pkgFileName, 'error reading'));
         }
@@ -703,7 +708,7 @@ class LocalStorage implements IStorage {
   _internalError(err: string, file: string, message: string) {
     this.logger.error( {err: err, file: file}, `${message}  @{file}: @{!err.message}` );
 
-    return ErrorCode.get500();
+    return ErrorCode.getInternalError();
   }
 
   /**
@@ -716,7 +721,7 @@ class LocalStorage implements IStorage {
     const storage: IPackageStorage = this._getLocalStorage(name);
 
     if (!storage) {
-      return callback( ErrorCode.get404() );
+      return callback( ErrorCode.getNotFound() );
     }
 
     storage.updatePackage(name, updateHandler, this._writePackage.bind(this), normalizePackage,
@@ -744,7 +749,10 @@ class LocalStorage implements IStorage {
       json._rev = DEFAULT_REVISION;
     }
 
-    json._rev = generateRevision(json._rev);
+    // this is intended in debug mode we do not want modify the store revision
+    if (_.isNil(this.config._debug)) {
+      json._rev = generateRevision(json._rev);
+    }
 
     return json;
   }
@@ -796,7 +804,7 @@ class LocalStorage implements IStorage {
     return this.localData.setSecret(config.checkSecretKey(secretKey));
   }
 
-  _loadStorage(config: Config, logger: Logger) {
+  _loadStorage(config: Config, logger: Logger): ILocalData {
     const Storage = this._loadStorePlugin();
 
     if (_.isNil(Storage)) {
@@ -807,13 +815,13 @@ class LocalStorage implements IStorage {
     }
   }
 
-  _loadStorePlugin() {
+  _loadStorePlugin(): ILocalData {
     const plugin_params = {
       config: this.config,
       logger: this.logger,
     };
 
-    return _.head(loadPlugin(this.config, this.config.store, plugin_params, function(plugin) {
+    return _.head(loadPlugin(this.config, this.config.store, plugin_params, (plugin) => {
       return plugin.getPackageStorage;
     }));
   }
